@@ -1,209 +1,99 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Домашняя аптечка</title>
-    <!-- Подключаем MAX Bridge: он нужен, чтобы страница «поняла», что открыта внутри MAX -->
-    <script src="https://st.max.ru/js/max-web-app.js"></script>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+<script>
+    // 1. Инициализация MAX Bridge (оставляем как было)
+    const bridge = window.WebApp;
+    if (bridge) {
+        bridge.ready();
+        const user = bridge.initDataUnsafe?.user;
+        if (user && user.first_name) {
+            const greetingEl = document.getElementById('greeting');
+            greetingEl.textContent = `Привет, ${user.first_name}! Ваша аптечка готова.`;
+            greetingEl.classList.add('visible');
         }
-        body {
-            background-color: #f5f5f5;
-            color: #1a1a1a;
-            padding: 16px;
-            padding-bottom: 80px; /* место под нижнюю кнопку */
-            min-height: 100vh;
-        }
-        .header {
-            margin-bottom: 20px;
-        }
-        .header h1 {
-            font-size: 22px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-        .header p {
-            font-size: 14px;
-            color: #666;
-        }
-        /* Приветствие из MAX Bridge */
-        .greeting {
-            background: #e8f0fe;
-            border-radius: 12px;
-            padding: 12px 16px;
-            font-size: 14px;
-            margin-bottom: 20px;
-            display: none; /* покажем, если данные есть */
-        }
-        .greeting.visible {
-            display: block;
-        }
-        /* Список лекарств */
-        .med-list {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        .med-card {
-            background: #fff;
-            border-radius: 12px;
-            padding: 16px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .med-info h3 {
-            font-size: 16px;
-            font-weight: 500;
-            margin-bottom: 4px;
-        }
-        .med-info .expiry {
-            font-size: 13px;
-            color: #666;
-        }
-        .med-status {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-        .status-green { background-color: #34c759; }
-        .status-yellow { background-color: #ffcc00; }
-        .status-red { background-color: #ff3b30; }
+    }
 
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: #888;
-            font-size: 14px;
+    // 2. Адрес вашего сервера
+    // ПОКА локальный. Позже замените на адрес задеплоенного сервера (например, https://api.вашдомен.ru)
+    const API_URL = 'http://localhost:3000';
+
+    // 3. Функция для запросов к серверу с initData
+    async function apiRequest(path, options = {}) {
+        const initData = bridge ? bridge.initData : '';
+        const headers = {
+            'Content-Type': 'application/json',
+            'x-max-init-data': initData,
+            ...(options.headers || {})
+        };
+        const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Ошибка запроса');
         }
-        /* Плавающая кнопка добавления */
-        .fab {
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            background: #007aff;
-            color: white;
-            font-size: 28px;
-            border: none;
-            box-shadow: 0 4px 12px rgba(0, 122, 255, 0.4);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            line-height: 1;
+        return response.json();
+    }
+
+    // 4. Отрисовка списка (аналогично тому, что было, но данные приходят с сервера)
+    const listEl = document.getElementById('medList');
+    const emptyEl = document.getElementById('emptyState');
+
+    function getStatus(expiryDateStr) {
+        const today = new Date();
+        const expiry = new Date(expiryDateStr);
+        const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+        if (diffDays < 0) return 'red';
+        if (diffDays < 30) return 'yellow';
+        return 'green';
+    }
+
+    function renderList(medicines) {
+        listEl.innerHTML = '';
+        if (!medicines || medicines.length === 0) {
+            emptyEl.style.display = 'block';
+            return;
         }
-        .fab:active {
-            background: #005bb5;
-        }
-    </style>
-</head>
-<body>
-
-    <div class="header">
-        <h1>Домашняя аптечка</h1>
-        <p>Следите за сроками и наличием</p>
-    </div>
-
-    <!-- Здесь покажем имя пользователя, если страница открыта внутри MAX -->
-    <div id="greeting" class="greeting"></div>
-
-    <div id="medList" class="med-list">
-        <!-- Сюда будем вставлять карточки лекарств через JS -->
-    </div>
-
-    <div id="emptyState" class="empty-state">
-        Пока пусто. Нажмите «+», чтобы добавить первое лекарство.
-    </div>
-
-    <button class="fab" id="addBtn">+</button>
-
-    <script>
-        // 1. Инициализация MAX Bridge
-        // Проверяем, открыта ли страница внутри MAX (объект window.WebApp существует)
-        const bridge = window.WebApp;
-
-        // Если открыто внутри MAX — показываем приветствие и сообщаем платформе, что мы готовы
-        if (bridge) {
-            // Сообщаем MAX, что приложение загрузилось (рекомендуется документацией)
-            bridge.ready();
-
-            // Пытаемся получить имя пользователя из данных, которые MAX передал при открытии
-            // initDataUnsafe — это данные для интерфейса (не для авторизации на сервере!)
-            const user = bridge.initDataUnsafe?.user;
-            if (user && user.first_name) {
-                const greetingEl = document.getElementById('greeting');
-                greetingEl.textContent = `Привет, ${user.first_name}! Ваша аптечка готова.`;
-                greetingEl.classList.add('visible');
-            }
-        } else {
-            // Если страница открыта просто в браузере (для отладки)
-            console.log('Режим предпросмотра: MAX Bridge не найден');
-        }
-
-        // 2. Логика отображения списка лекарств
-        // Пока используем тестовые данные (заглушку), чтобы сразу увидеть результат
-        const medicines = [
-            { name: 'Парацетамол', expiry: '2027-05-20' },
-            { name: 'Ибупрофен', expiry: '2026-12-01' },
-            { name: 'Витамин D', expiry: '2025-08-10' } // специально просроченный для примера
-        ];
-
-        const listEl = document.getElementById('medList');
-        const emptyEl = document.getElementById('emptyState');
-
-        function getStatus(expiryDateStr) {
-            const today = new Date();
-            const expiry = new Date(expiryDateStr);
-            const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
-
-            if (diffDays < 0) return 'red';      // просрочено
-            if (diffDays < 30) return 'yellow';  // истекает скоро
-            return 'green';                       // в порядке
-        }
-
-        function renderList() {
-            listEl.innerHTML = '';
-            if (medicines.length === 0) {
-                emptyEl.style.display = 'block';
-                return;
-            }
-            emptyEl.style.display = 'none';
-
-            medicines.forEach(med => {
-                const status = getStatus(med.expiry);
-                const card = document.createElement('div');
-                card.className = 'med-card';
-                card.innerHTML = `
-                    <div class="med-info">
-                        <h3>${med.name}</h3>
-                        <div class="expiry">Годен до: ${med.expiry}</div>
-                    </div>
-                    <div class="med-status status-${status}"></div>
-                `;
-                listEl.appendChild(card);
-            });
-        }
-
-        renderList();
-
-        // 3. Обработка кнопки «+» (пока просто заглушка)
-        document.getElementById('addBtn').addEventListener('click', () => {
-            // В реальной версии здесь будет открытие формы добавления
-            // Сейчас просто покажем алерт для проверки интерактивности
-            alert('Здесь будет форма добавления лекарства');
+        emptyEl.style.display = 'none';
+        medicines.forEach(med => {
+            const status = getStatus(med.expiryDate);
+            const card = document.createElement('div');
+            card.className = 'med-card';
+            card.innerHTML = `
+                <div class="med-info">
+                    <h3>${med.name}</h3>
+                    <div class="expiry">Годен до: ${med.expiryDate}</div>
+                </div>
+                <div class="med-status status-${status}"></div>
+            `;
+            listEl.appendChild(card);
         });
-    </script>
-</body>
-</html>
+    }
+
+    // 5. Загрузка данных при старте
+    async function loadMedicines() {
+        try {
+            const data = await apiRequest('/api/medicines', { method: 'POST' });
+            renderList(data.medicines);
+        } catch (e) {
+            console.error('Не удалось загрузить лекарства:', e);
+            renderList([]); // покажем пустое состояние
+        }
+    }
+
+    // 6. Кнопка «+» — пока простой prompt, позже заменим на форму
+    document.getElementById('addBtn').addEventListener('click', async () => {
+        const name = prompt('Название лекарства:');
+        if (!name) return;
+        const expiryDate = prompt('Срок годности (ГГГГ-ММ-ДД):');
+        if (!expiryDate) return;
+        try {
+            await apiRequest('/api/medicines/add', {
+                method: 'POST',
+                body: JSON.stringify({ name, expiryDate })
+            });
+            await loadMedicines(); // обновляем список
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    });
+
+    // 7. Старт
+    loadMedicines();
+</script>
